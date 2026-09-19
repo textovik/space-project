@@ -11,7 +11,7 @@ usedCoordinates = []
 # --project settings
 MAX_X_AXIS = 860
 MAX_Y_AXIS = 640
-MAX_RENDERED_STARS = 2000
+MAX_RENDERED_STARS = 5000
 
 X_CENTRE = MAX_X_AXIS // 2
 Y_CENTRE = MAX_Y_AXIS // 2
@@ -27,8 +27,8 @@ GRAPH_DISTORTION = 0.2916 # UBV TO RGB SMOOTHNESS
 COOLING_DOWN_SPEED = -1.16 # FROM BLUE TO RED TRANSITION
 
 GALAXY_CENTRE_MASS = 12000
-CORE_RADIUS = 50
-dt = 0.02
+CORE_RADIUS = 200
+dt = 0.02 # SIMULATION SPEED/ORIGINAL=0.02
 
 # --spiral
 spin_m = 0.035
@@ -45,9 +45,7 @@ clock = pygame.time.Clock()
 
 # STARS RENDERING
 class Star:
-    def __init__(self, x, y, temperature, light_emission, radius, SpeedX, SpeedY):
-        self.x = float(x)
-        self.y = float(y)
+    def __init__(self, temperature, light_emission, radius, SpeedX, SpeedY, distance, angle):
 
         self.star = None
         self.mass = 0 # KG
@@ -57,10 +55,22 @@ class Star:
         self.temperature = temperature # KELVIN
         self.light_emission = light_emission
 
-        Dx = x - X_CENTRE
-        Dy = y - Y_CENTRE
-        self.spawn_r = math.sqrt(pow(Dx, 2) + pow(Dy, 2))
-        self.orbit_angle = math.atan2(self.y - Y_CENTRE, self.x - X_CENTRE)
+        self.a = float(distance)
+        self.e = 0.40
+        self.ellipse_tilt = numpy.sqrt(self.a) * 0.42
+        self.true_anomaly = angle - self.ellipse_tilt
+
+        r = (self.a * (1 - pow(self.e, 2))) / (1 + self.e * numpy.cos(self.true_anomaly))
+
+        x_orbit = r * numpy.cos(self.true_anomaly)
+        y_orbit = r * numpy.sin(self.true_anomaly)
+
+        rot_x = x_orbit * numpy.cos(self.ellipse_tilt) - y_orbit * numpy.sin(self.ellipse_tilt)
+        rot_y = x_orbit * numpy.sin(self.ellipse_tilt) + y_orbit * numpy.cos(self.ellipse_tilt)
+
+        self.x = X_CENTRE + rot_x + (self.a * self.e * math.cos(self.ellipse_tilt))
+        self.y = Y_CENTRE + rot_y + (self.a * self.e * math.sin(self.ellipse_tilt))
+        
     def draw(self):
         # GETTING COLOR USING TEMPERATURE
         BV_result = IDEAL_COLOR_FORM * numpy.sqrt(KEVIN_CONVERTER/self.temperature + GRAPH_DISTORTION) - 1.16 # BALLESTEROS` FORMULA
@@ -96,36 +106,27 @@ class Star:
             G_color = 100
             B_color = 0
 
-        if self.spawn_r < 10:
-            pygame.draw.circle(screen, (R_color, G_color, B_color) , (int(self.x), int(self.y)), self.radius, 0)
-            return
-
-        bar_radius = 45
-        spin_m_dynamic = 0.045
-
-        if self.spawn_r < bar_radius:
-            visual_angle = self.orbit_angle
-        else:
-            visual_angle = self.orbit_angle + ((self.spawn_r - bar_radius) * spin_m_dynamic)
-
-        # FROM POLAR COORDINATES(ANGLE&DISTANCE) TO CARTESIAN COORDINATES(X&Y)
-        render_x = X_CENTRE + self.spawn_r * math.cos(visual_angle)
-        render_y = Y_CENTRE + self.spawn_r * math.sin(visual_angle)
-
         # SURFACE    COLOR   COORDINATES{X,Y}     RADIUS      FILL OUT
-        pygame.draw.circle(screen, (R_color, G_color, B_color) , (int(render_x), int(render_y)), self.radius, 0)
+        pygame.draw.circle(screen, (R_color, G_color, B_color) , (int(self.x), int(self.y)), self.radius, 0)
 
     def move(self):
-        if self.spawn_r < 10: return # TO PREVENT ZERO DIVISION
+        if self.a < 5: return # PREVENT ZERO DIVISION
 
-        # STABLE SPEED/BLACK MATTER (THE FURTHER THE STAR IS FROM THE CENTRE, THE FASTER IT MOVES)
-        v_orbital = math.sqrt((G * GALAXY_CENTRE_MASS) / (self.spawn_r + CORE_RADIUS))
-        angular_velocity = v_orbital / self.spawn_r
+        v_orbital = numpy.sqrt((G * GALAXY_CENTRE_MASS) / (self.a + CORE_RADIUS)) # BLACK MATTER EFFECT/KEPLER`S FORMULA
+        angular_velocity = v_orbital / self.a
+        
+        self.true_anomaly += angular_velocity * dt
 
-        self.orbit_angle += angular_velocity * dt
+        r = (self.a * (1 - pow(self.e, 2))) / (1 + self.e * numpy.cos(self.true_anomaly))
 
-        self.x = X_CENTRE + self.spawn_r * math.cos(self.orbit_angle)
-        self.y = Y_CENTRE + self.spawn_r * math.sin(self.orbit_angle)
+        x_orbit = r * numpy.cos(self.true_anomaly)
+        y_orbit = r * numpy.sin(self.true_anomaly)
+
+        rot_x = x_orbit * numpy.cos(self.ellipse_tilt) - y_orbit * numpy.sin(self.ellipse_tilt)
+        rot_y = x_orbit * numpy.sin(self.ellipse_tilt) + y_orbit * numpy.cos(self.ellipse_tilt)
+
+        self.x = X_CENTRE + rot_x + (self.a * self.e * math.cos(self.ellipse_tilt))
+        self.y = Y_CENTRE + rot_y + (self.a * self.e * math.sin(self.ellipse_tilt))
 
 stars_list = []
 
@@ -141,12 +142,12 @@ while len(stars_list) < MAX_RENDERED_STARS:
 
     # SHAPE OF THE GALAXY(SPIRALLY)
 
-    num_arms = 4  # NUMBER OF SPIRAL ARMS
-    arm = random.randint(0, num_arms - 1)  # CHOOSE ARM FOR THE STAR
-    arm_offset = arm * (2 * numpy.pi / num_arms)  # ARM ANGLE SHIFT
+    num_arms = 2
+    arm = random.randint(0, num_arms - 1)
+    arm_offset = arm * (2 * numpy.pi / num_arms)  
 
-    blur = random.gauss(0, 0.12)  # Reduced from 0.18 to make arms sharper
-    angle = arm_offset + blur  # FINAL INITIAL ANGLE
+    blur = random.gauss(0, 0.25) # 0.25 FOR 2 ARMS/0.18 FOR 4 ARMS/ETC.
+    angle = arm_offset + blur
 
     # FROM POLAR COORDINATES(ANGLE&DISTANCE) TO CARTESIAN COORDINATES(X&Y)
     x = int(X_CENTRE + distance * numpy.cos(angle))
@@ -179,7 +180,7 @@ while len(stars_list) < MAX_RENDERED_STARS:
         Vx = -V * (Dy / R)
         Vy = V * (Dx / R)
 
-        star_object = Star(x, y, temperature, light_emission, total_r, Vx, Vy)
+        star_object = Star(temperature, light_emission, total_r, Vx, Vy, distance, angle)
         stars_list.append(star_object)
         usedCoordinates.append((x, y)) # STORE COORDINATE
 
